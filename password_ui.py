@@ -1,5 +1,5 @@
 import os
-import sys
+from typing import Optional
 from password_manager import Vault
 import customtkinter as ctk
 import random
@@ -7,19 +7,17 @@ import string
 import pyperclip  # Библиотека для копирования в буфер обмена
 from PIL import Image
 from tkinter import messagebox
+from utils import RightClickMenu, resource_path, load_appearance_mode, handle_hotkeys
+from vault_ui import VaultWindow
+from auth_ui import AuthWindow
+from _tkinter import TclError
+from security import InactivityTracker
 
 
-def resource_path(relative_path):
-    """
-    Получает абсолютный путь к ресурсам (иконкам, картинкам),
-    работая и в коде, и в скомпилированном .exe
-    """
-    # Используем getattr, чтобы редактор кода не видел прямой ссылки на sys._MEIPASS
-    base_path = getattr(sys, '_MEIPASS', os.path.abspath("."))
-    return os.path.join(base_path, relative_path)
-
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+# ctk.set_appearance_mode("dark")
+# ctk.set_default_color_theme("blue")
+current_theme = load_appearance_mode()
+ctk.set_appearance_mode(current_theme)
 
 
 class PasswordGenerator(ctk.CTk):
@@ -36,73 +34,68 @@ class PasswordGenerator(ctk.CTk):
 
         self.vault = Vault()
         self.title("Password Generator Pro")
+        self.vault_window: Optional[VaultWindow] = None
+        # self.vault_window = None  # Заглушка для будущего окна хранилища
 
-        # ---Указываем размеры окна---
+        # 1. ---Указывает размеры окна---
         window_width = 450
-        window_height = 620
+        window_height = 590
 
-        # Получаем размеры экрана
+        # 1.1 Получает размеры экрана
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
 
-        # Вычисляем координаты центра
+        # 1.2 Вычисляем координаты центра
         center_x = int(screen_width / 2 - window_width / 2)
         center_y = int(screen_height / 2 - window_height / 2)
 
-        # Устанавливаем геометрию с координатами
+        # 1.3 Устанавливает геометрию с координатами
         self.geometry(f"{window_width}x{window_height}+{center_x}+{center_y}")
 
+        # 2. --- Запрет изменения размера окна ---
         self.resizable(False, False)
 
-        # ---Иконка---
+        # 3. --- Иконка-ЛОГОТИП программы у левом углу окна ---
         self.wm_iconbitmap(resource_path("logo.ico"))
 
-        # --- Заголовок ---
+        # 4. --- Заголовок окна ---
         self.label = ctk.CTkLabel(self, text="ГЕНЕРАТОР ПАРОЛЕЙ", font=("Roboto", 24, "bold"))
-        self.label.pack(pady=(5, 5))
+        self.label.pack(pady=(5, 3))
 
-        # --- Поле вывода пароля ---
+        # 5. --- Поле вывода пароля ---
         self.entry_label = ctk.CTkLabel(self, text="Ваш новый пароль:", font=("Roboto", 12))
-        self.entry_label.pack(pady=(5, 0))
+        self.entry_label.pack(pady=(3, 0))
 
-        # Загружаем иконку
+        # 6. --- Загружает иконку копировать - с права от поля пароля ---
         self.copy_icon = ctk.CTkImage(
             light_image=Image.open(resource_path("copy_icon.png")),
             dark_image=Image.open(resource_path("copy_icon.png")),
             size=(20, 20)  # Размер иконки внутри кнопки
         )
 
-        # --- Контейнер для поля и кнопки (ровняем по центру) ---
+        # 7. --- Контейнер для поля и кнопки-иконка копировать ---
         self.entry_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.entry_frame.pack(pady=10, fill="x", padx=40)  # Растягиваем по горизонтали
+        self.entry_frame.pack(pady=10, fill="x", padx=40)  # Растягивает по горизонтали
 
-        # Поле вывода
+        # 7.1 Поле вывода
         self.result_entry = ctk.CTkEntry(
             self.entry_frame,
-            font=("Consolas", 16),
-            justify="center",
-            width=300,  # Фиксированная ширина
-            height=50,
+            font=("Consolas", 16), justify="center",
+            width=300, height=50,
             placeholder_text="Нажмите 'Сгенерировать'"
         )
         self.result_entry.pack(side="left", expand=True, fill="x", padx=(0, 5))
 
-        # Кнопка с иконкой
+        # 7.2 Кнопка с иконкой
         self.copy_button = ctk.CTkButton(
             self.entry_frame,
-            text="",
-            image=self.copy_icon,
-            width=35,
-            height=35,
+            text="", image=self.copy_icon, width=35, height=35,
             command=self.copy_to_clipboard,
-            fg_color="transparent",
-            border_width=2,
-            border_color="#3498DB",
-            hover_color="#2C3E50"
+            fg_color="transparent", hover_color="#2C3E50"
         )
         self.copy_button.pack(side="right")
 
-        # --- Ползунок длины ---
+        # 8. --- Ползунок длины ---
         self.len_label = ctk.CTkLabel(self, text="Длина пароля: 12", font=("Roboto", 14))
         self.len_label.pack(pady=(2, 0))
 
@@ -110,7 +103,7 @@ class PasswordGenerator(ctk.CTk):
         self.slider.set(12)  # Значение по умолчанию
         self.slider.pack(pady=5)
 
-        # --- Настройки (Чекбоксы) ---
+        # 9. --- Настройки (Чекбоксы) ---
         self.check_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.check_frame.pack(pady=4)
 
@@ -133,43 +126,90 @@ class PasswordGenerator(ctk.CTk):
         self.exclude_bad = ctk.CTkCheckBox(self.check_frame, text="Исключить сложные (il1Lo0O)")
         self.exclude_bad.pack(anchor="w", pady=4)
 
-        # ---Кнопка СГЕНЕРИРОВАТЬ---
+        # 10. --- Кнопка СГЕНЕРИРОВАТЬ ---
         self.gen_button = ctk.CTkButton(
             self,
             text="СГЕНЕРИРОВАТЬ",
             command=self.generate,
-            font=("Roboto", 20, "bold"),  # Размер шрифта
-            height=43,  # Высота кнопки
+            font=("Roboto", 20, "bold"),
+            height=35,  # Высота кнопки
             width=300,  # Ширина кнопки
-            fg_color="#27AE60",  # Насыщенный зеленый (Emerald)
+            fg_color="#27AE60",  # Насыщенный зеленый
             hover_color="#2ECC71",  # Светло-зеленый при наведении
         )
-        self.gen_button.pack(pady=10)
+        self.gen_button.pack(pady=2)
 
-        # --- Поле ввода сервиса (для связи пароля с почтой/сайтом) ---
-        self.service_label = ctk.CTkLabel(self, text="Название сервиса (сайт/почта):", font=("Roboto", 12))
-        self.service_label.pack(pady=(5, 0))
+        # 11. --- Глобальная привязка горячих клавиш: позволяет Ctrl+C/V работать при любой раскладке ---
+        self.bind_all("<Key>", lambda e: handle_hotkeys(e, self))
+
+        # 12. --- Поле ввода сервиса (для связи пароля с почтой/сайтом) ---
+        self.service_label = ctk.CTkLabel(
+            self,
+            text="Название сервиса или сайта:",
+            font=("Roboto", 12)
+        )
+        self.service_label.pack(pady=(4, 0))
 
         self.service_entry = ctk.CTkEntry(
             self,
             placeholder_text="Например: google.com",
             width=350
         )
-        self.service_entry.pack(pady=(0, 10))
+        self.service_entry.pack(pady=(0, 4))
+        RightClickMenu(self.service_entry)  # Работает правая кнопка
 
-        # --- Кнопка СОХРАНИТЬ ---
-        self.save_button = ctk.CTkButton(
+        # 13. --- Поле ввода ЛОГИНА ---
+        self.login_label = ctk.CTkLabel(
             self,
+            text="Логин или Email:",
+            font=("Roboto", 12)
+        )
+        self.login_label.pack(pady=(5, 0))
+
+        self.login_entry = ctk.CTkEntry(
+            self,
+            placeholder_text="Например: pupkin@mail.ru",
+            width=350
+        )
+        self.login_entry.pack(pady=(0, 5))
+        RightClickMenu(self.login_entry)
+
+        # 14. --- Контейнер для кнопок управления ---
+        self.actions_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.actions_frame.pack(pady=10, fill="x", padx=40)
+
+        # 14.1 Кнопка "ЗАШИФРОВАТЬ И СОХРАНИТЬ" (внутри actions_frame)
+        self.save_button = ctk.CTkButton(
+            self.actions_frame,
             text="ЗАШИФРОВАТЬ И СОХРАНИТЬ",
-            command=self.save_encrypted_password,  # Метод, который мы создали
-            font=("Roboto", 15, "bold"),
-            width=220,
-            height=35,
-            fg_color="#8E44AD",  # Фиолетовый цвет, чтобы отличалась от генерации
+            command=self.save_encrypted_password,
+            font=("Roboto", 14),
+            width=170,
+            height=33,
+            fg_color="#8E44AD",  # Фиолетовый цвет
             hover_color="#9B59B6"
         )
+        self.save_button.pack(side="left", expand=True, padx=(0, 5))
 
-        self.save_button.pack(pady=10)
+        # 14.2 Кнопка "МОИ ПАРОЛИ"
+        self.view_button = ctk.CTkButton(
+            self.actions_frame,
+            text="МОИ ПАРОЛИ",
+            command=self.open_vault,
+            font=("Roboto", 14,),
+            height=33,
+            width=170,
+            fg_color="#A04000",
+            hover_color="#D35400"
+        )
+        self.view_button.pack(side="left", expand=True, padx=(5, 0))
+
+        # 15. --- Инициализация системы безопасности: автоблокировка при бездействии через 5 минут ---
+        self.tracker = InactivityTracker(self, timeout=300000)  # 5 минут
+        self.tracker.start()
+
+        # Гарантирует полный выход при закрытии на крестик
+        self.protocol("WM_DELETE_WINDOW", lambda: os._exit(0))
 
     def update_slider_label(self, value):
         """
@@ -189,7 +229,7 @@ class PasswordGenerator(ctk.CTk):
         результат в текстовое поле.
         """
         chars = ""
-        # 1. Сборка символов
+        # 1. --- Сборка символов ---
         if self.use_digits.get(): chars += string.digits
         if self.use_low.get(): chars += string.ascii_lowercase
         if self.use_up.get(): chars += string.ascii_uppercase
@@ -199,23 +239,23 @@ class PasswordGenerator(ctk.CTk):
             for c in "il1Lo0O":
                 chars = chars.replace(c, "")
 
-        # 2. ПРОВЕРКА: Если ничего не выбрано (блок)
+        # 2. --- ПРОВЕРКА: Если ничего не выбрано (блок) ---
         if not chars:
-            self.result_entry.configure(state="normal")  # Разблокировали
+            self.result_entry.configure(state="normal")  # Разблокировка
             self.result_entry.delete(0, "end")
             self.result_entry.insert(0, "Выберите настройки!")
-            self.result_entry.configure(state="readonly")  # Заблокировали обратно
+            self.result_entry.configure(state="readonly")  # Заблокировано обратно
             return  # ВЫХОДИМ из функции, чтобы код ниже не упал с ошибкой
 
-        # 3. САМА ГЕНЕРАЦИЯ (если chars не пустой)
+        # 3. --- САМА ГЕНЕРАЦИЯ (если chars не пустой) ---
         length = int(self.slider.get())
         password = "".join(random.choices(chars, k=length))
 
-        # 4. ВЫВОД РЕЗУЛЬТАТА
-        self.result_entry.configure(state="normal")  # Разблокировали
+        # 4. --- ВЫВОД РЕЗУЛЬТАТА ---
+        self.result_entry.configure(state="normal")  # Разблокировка
         self.result_entry.delete(0, "end")
         self.result_entry.insert(0, password)
-        self.result_entry.configure(state="readonly")  # Заблокировали обратно
+        self.result_entry.configure(state="readonly")  # Заблокировано обратно
 
     def copy_to_clipboard(self):
         """
@@ -228,7 +268,7 @@ class PasswordGenerator(ctk.CTk):
         # Список системных сообщений, которые НЕ надо копировать
         bad_values = ["Выберите настройки!", "Нажмите 'Сгенерировать'"]
 
-        if password and password not in bad_values:
+        if password not in bad_values:
             pyperclip.copy(password)
 
             # Эффект успеха: кнопка становится зеленой
@@ -238,8 +278,8 @@ class PasswordGenerator(ctk.CTk):
                 hover_color="#27AE60"  # Чтобы при наведении не менялась
             )
 
-            # Через 1.2 секунды возвращаем всё как было
-            self.after(1200, self.reset_copy_button)  # noqa
+            # Через 1.5 секунды возвращает всё как было
+            self.after(1500, self.reset_copy_button)  # noqa
 
             # Всплывающее уведомление
             messagebox.showinfo(
@@ -262,29 +302,36 @@ class PasswordGenerator(ctk.CTk):
             self,
             text=message,
             fg_color="#2ECC71",  # Яркий зеленый
-            text_color="black",  # Черный текст для контраста
+            text_color="black",  # Черный текст
             corner_radius=10,
             font=("Roboto", 14, "bold"),
             width=250,
             height=35
         )
-        # Размещаем внизу окна по центру
+        # Размещает внизу окна по центру
         toast.place(relx=0.5, rely=0.24, anchor="center")
 
-        # Удаляем через 2 секунды
-        self.after(2000, toast.destroy)
+        # Удаляет через 1,5 секунды
+        self.after(1500, toast.destroy)  # noqa
 
     def save_encrypted_password(self):
-        service = self.service_entry.get()
-        password = self.result_entry.get()
+        """
+        Считывает данные из полей ввода и сохраняет их в зашифрованное хранилище.
+        Метод проверяет наличие названия сервиса и корректность сгенерированного
+        пароля, после чего передает их в Vault для шифрования и записи в файл.
+        При успешном завершении изменяет внешний вид кнопки для визуального отклика.
+        """
+        service = self.service_entry.get().strip()
+        login = self.login_entry.get().strip()
+        password = self.result_entry.get().strip()
 
         # Проверка на пустые значения
         bad_values = ["Выберите настройки!", "Нажмите 'Сгенерировать'", ""]
-        if service == "" or password in bad_values:
+        if service == "" or login == "" or password in bad_values:
             return
 
-        # Используем наш новый менеджер
-        self.vault.save_entry(service, password)
+        # Использует новый менеджер
+        self.vault.save_entry(service, login, password)
 
         # Визуальный отклик (зеленая кнопка)
         self.save_button.configure(text="СОХРАНЕНО!", fg_color="#27AE60")
@@ -293,6 +340,40 @@ class PasswordGenerator(ctk.CTk):
             fg_color="#8E44AD"
         ))  # noqa
 
+    def open_vault(self):
+        """Открывает окно хранилища паролей"""
+        # Проверяет, существует ли объект и является ли он живым окном
+        if self.vault_window is not None and self.vault_window.winfo_exists():
+            self.vault_window.focus()
+            self.vault_window.lift()  # Выводит окно на передний план
+        else:
+            # Создает новое окно
+            self.vault_window = VaultWindow(self)
+
+
 if __name__ == "__main__":
-    app = PasswordGenerator()
-    app.mainloop()
+    # Цикл позволяет программе "возвращаться" к авторизации после автоблокировки
+    while True:
+        try:
+            # 1. Запускает авторизацию
+            auth_app = AuthWindow()
+            auth_app.mainloop()
+
+            # Проверяет, прошел ли юзер авторизацию
+            if getattr(auth_app, 'authorized', False):
+                # Перед запуском второго окна принудительно очищает ресурсы
+                auth_app.destroy()
+
+                # 2. Запускает основное приложение
+                app = PasswordGenerator()
+                app.mainloop()
+
+                # Если выполнение дошло сюда, значит mainloop завершился.
+                # Если это была автоблокировка (self.destroy()), цикл начнется сначала.
+                # Если юзер нажал на крестик, сработает os._exit(0) и программа закроется.
+            else:
+                # Если юзер закрыл окно входа сам — выходим из цикла полностью
+                break
+
+        except (RuntimeError, TclError, NameError):  # noqa
+            break  # При критической ошибке завершает работу
