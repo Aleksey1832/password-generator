@@ -1,5 +1,21 @@
+# Окружение и кэш
 .venv/
-logs/
-*.xlsx
 __pycache__/
 .idea/
+logs/
+
+# Секретные ключи и базы данных
+*.key
+*.lic
+*.dat
+settings.json
+settings.py
+keygen.py
+
+# Текстовые файлы
+*.txt
+
+# Результаты сборки
+build/
+dist/
+*.spec
